@@ -27,6 +27,7 @@ public struct SwiftDownEditor: UIViewRepresentable {
     private(set) var keyboardType: UIKeyboardType = .default
     private(set) var hasKeyboardToolbar: Bool = true
     private(set) var textAlignment: TextAlignment = .leading
+    private(set) var hideMarkdownSymbols: Bool = false
 
     public var onTextChange: (String) -> Void = { _ in }
     public var onSelectionChange: (NSRange) -> Void = { _ in }
@@ -35,11 +36,13 @@ public struct SwiftDownEditor: UIViewRepresentable {
     public init(
       text: Binding<String>,
       onTextChange: @escaping (String) -> Void = { _ in },
-      onSelectionChange: @escaping (NSRange) -> Void = { _ in }
+      onSelectionChange: @escaping (NSRange) -> Void = { _ in },
+      hideMarkdownSymbols: Bool = false
     ) {
       _text = text
       self.onTextChange = onTextChange
       self.onSelectionChange = onSelectionChange
+      self.hideMarkdownSymbols = hideMarkdownSymbols
     }
 
     public func makeUIView(context: Context) -> SwiftDown {
@@ -47,6 +50,8 @@ public struct SwiftDownEditor: UIViewRepresentable {
       swiftDown.storage.markdowner = { self.engine.render($0, offset: $1) }
       swiftDown.storage.applyMarkdown = { m in Theme.applyMarkdown(markdown: m, with: self.theme) }
       swiftDown.storage.applyBody = { Theme.applyBody(with: self.theme) }
+      swiftDown.storage.hideMarkdownSymbols = self.hideMarkdownSymbols
+      swiftDown.storage.theme = self.theme
       swiftDown.delegate = context.coordinator
       swiftDown.isEditable = isEditable
       swiftDown.isScrollEnabled = true
@@ -65,16 +70,39 @@ public struct SwiftDownEditor: UIViewRepresentable {
     }
 
   public func updateUIView(_ uiView: SwiftDown, context: Context) {
+    // Only update if the text has actually changed
+    guard uiView.text != text else { return }
+    
     context.coordinator.cancellable?.cancel()
     context.coordinator.cancellable = Timer
       .publish(every: debounceTime, on: .current, in: .default)
       .autoconnect()
       .first()
       .sink { _ in
-        let selectedRange = uiView.selectedRange
-        uiView.text = text
-        uiView.highlighter?.applyStyles()
-        uiView.selectedRange = selectedRange
+        DispatchQueue.main.async {
+          let selectedRange = uiView.selectedRange
+          let wasFirstResponder = uiView.isFirstResponder
+          let currentFrame = uiView.frame
+          let currentBounds = uiView.bounds
+          
+          // Disable automatic scrolling and frame changes
+          uiView.isScrollEnabled = false
+          
+          uiView.text = text
+          uiView.highlighter?.applyStyles()
+          
+          // Restore original frame to prevent layout changes
+          uiView.frame = currentFrame
+          uiView.bounds = currentBounds
+          
+          // Re-enable scrolling
+          uiView.isScrollEnabled = true
+          
+          // Restore selection and first responder status
+          if wasFirstResponder {
+            uiView.selectedRange = selectedRange
+          }
+        }
       }
   }
 
@@ -97,7 +125,10 @@ public struct SwiftDownEditor: UIViewRepresentable {
         guard textView.markedTextRange == nil else { return }
 
         DispatchQueue.main.async {
+          // Prevent triggering SwiftUI layout updates during text changes
+          let currentFrame = textView.frame
           self.parent.text = textView.text
+          textView.frame = currentFrame
         }
       }
 
@@ -153,6 +184,7 @@ public struct SwiftDownEditor: UIViewRepresentable {
     private(set) var isEditable: Bool = true
     private(set) var theme: Theme = Theme.BuiltIn.defaultDark.theme()
     private(set) var insetsSize: CGFloat = 0
+    private(set) var hideMarkdownSymbols: Bool = false
 
     public var onTextChange: (String) -> Void = { _ in }
     public var onSelectionChange: (NSRange) -> Void = { _ in }
@@ -160,15 +192,17 @@ public struct SwiftDownEditor: UIViewRepresentable {
     public init(
       text: Binding<String>,
       onTextChange: @escaping (String) -> Void = { _ in },
-      onSelectionChange: @escaping (NSRange) -> Void = { _ in }
+      onSelectionChange: @escaping (NSRange) -> Void = { _ in },
+      hideMarkdownSymbols: Bool = false
     ) {
       _text = text
       self.onTextChange = onTextChange
       self.onSelectionChange = onSelectionChange
+      self.hideMarkdownSymbols = hideMarkdownSymbols
     }
 
     public func makeNSView(context: Context) -> SwiftDown {
-      let swiftDown = SwiftDown(theme: theme, isEditable: isEditable, insetsSize: insetsSize)
+      let swiftDown = SwiftDown(theme: theme, isEditable: isEditable, insetsSize: insetsSize, hideMarkdownSymbols: hideMarkdownSymbols)
       swiftDown.delegate = context.coordinator
       swiftDown.setupTextView()
       swiftDown.text = text
@@ -176,16 +210,27 @@ public struct SwiftDownEditor: UIViewRepresentable {
     }
 
     public func updateNSView(_ nsView: SwiftDown, context: Context) {
+      // Only update if the text has actually changed
+      guard nsView.text != text else { return }
+      
       context.coordinator.cancellable?.cancel()
       context.coordinator.cancellable = Timer
         .publish(every: debounceTime, on: .current, in: .default)
         .autoconnect()
         .first()
         .sink { _ in
-          let selectedRanges = nsView.selectedRanges
-          nsView.text = text
-          nsView.applyStyles()
-          nsView.selectedRanges = selectedRanges
+          DispatchQueue.main.async {
+            let selectedRanges = nsView.selectedRanges
+            let wasFirstResponder = nsView.textView.window?.firstResponder == nsView.textView
+            
+            nsView.text = text
+            nsView.applyStyles()
+            
+            // Restore selection to prevent unwanted scrolling
+            if wasFirstResponder {
+              nsView.selectedRanges = selectedRanges
+            }
+          }
         }
     }
 
@@ -247,4 +292,10 @@ extension SwiftDownEditor {
      editor.debounceTime = debounceTime
      return editor
    }
+
+  public func hideMarkdownSymbols(_ hideMarkdownSymbols: Bool) -> Self {
+    var editor = self
+    editor.hideMarkdownSymbols = hideMarkdownSymbols
+    return editor
+  }
 }

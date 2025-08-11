@@ -28,6 +28,7 @@ public class Storage: NSTextStorage {
   public var markdowner: (String, Int) -> [MarkdownNode] = { _,_  in [] }
   public var applyMarkdown: (MarkdownNode) -> [NSAttributedString.Key: Any] = { _ in [:] }
   public var applyBody: () -> [NSAttributedString.Key: Any] = { [:] }
+  public var hideMarkdownSymbols: Bool = false
   var cancellables = Set<AnyCancellable>()
   let subj = PassthroughSubject<EditedText, Never>()
 
@@ -103,10 +104,41 @@ public class Storage: NSTextStorage {
       paragraph = self.string
     }
     let md = markdowner(paragraph, paragraphNSRange.lowerBound)
+    
+    // Begin batch editing to prevent flickering
+    beginEditing()
+    
     setAttributes(applyBody(), range: paragraphNSRange)
-    md.forEach {
-      addAttributes(applyMarkdown($0), range: $0.range)
+    
+    md.forEach { markdownNode in
+      // Apply normal markdown styling to the entire range
+      addAttributes(applyMarkdown(markdownNode), range: markdownNode.range)
+      
+      // If hideMarkdownSymbols is enabled, hide symbol ranges
+      if hideMarkdownSymbols, let theme = theme {
+        let symbolRanges = Theme.getSymbolRanges(for: markdownNode, in: self.string)
+        for symbolRange in symbolRanges {
+          var hiddenAttributes: [NSAttributedString.Key: Any] = [:]
+          
+          // Use a very small font size to minimize space usage
+          #if os(iOS)
+          hiddenAttributes[.font] = UIFont.systemFont(ofSize: 0.1)
+          #else
+          hiddenAttributes[.font] = NSFont.systemFont(ofSize: 0.1)
+          #endif
+          
+          // Make the color match the background to hide the tiny text
+          hiddenAttributes[.foregroundColor] = theme.backgroundColor
+          
+          // Remove any existing background color to avoid visual artifacts
+          hiddenAttributes[.backgroundColor] = theme.backgroundColor
+          
+          addAttributes(hiddenAttributes, range: symbolRange)
+        }
+      }
     }
-    self.edited(.editedAttributes, range: paragraphNSRange, changeInLength: 0)
+    
+    // End batch editing to apply all changes at once
+    endEditing()
   }
 }

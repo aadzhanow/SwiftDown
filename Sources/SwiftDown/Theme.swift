@@ -147,10 +147,112 @@ public struct Theme {
   }
 
   // MARK: - Static methods
-  static func applyMarkdown(markdown: MarkdownNode, with theme: Theme) -> [NSAttributedString.Key:
+  static func applyMarkdown(markdown: MarkdownNode, with theme: Theme, hideSymbols: Bool = false) -> [NSAttributedString.Key:
     Any] {
     guard let attributes = theme.styles[markdown.type]?.attributes else { return [:] }
     return attributes
+  }
+  
+  static func getSymbolRanges(for markdown: MarkdownNode, in text: String) -> [NSRange] {
+    let range = markdown.range
+    guard range.location + range.length <= text.count else { return [] }
+    
+    let start = text.index(text.startIndex, offsetBy: range.location)
+    let end = text.index(start, offsetBy: range.length)
+    let nodeText = String(text[start..<end])
+    
+    var symbolRanges: [NSRange] = []
+    let baseLocation = range.location
+    
+    switch markdown.type {
+    case .bold:
+      // **text** - hide the ** at start and end
+      if nodeText.hasPrefix("**") {
+        symbolRanges.append(NSRange(location: baseLocation, length: 2))
+      }
+      if nodeText.hasSuffix("**") && nodeText.count >= 4 {
+        symbolRanges.append(NSRange(location: baseLocation + nodeText.count - 2, length: 2))
+      }
+      
+    case .italic:
+      // *text* - hide the * at start and end  
+      if nodeText.hasPrefix("*") && !nodeText.hasPrefix("**") {
+        symbolRanges.append(NSRange(location: baseLocation, length: 1))
+      }
+      if nodeText.hasSuffix("*") && !nodeText.hasSuffix("**") && nodeText.count >= 2 {
+        symbolRanges.append(NSRange(location: baseLocation + nodeText.count - 1, length: 1))
+      }
+      
+    case .header1, .header2, .header3, .header4, .header5, .header6:
+      // # text, ## text, etc. - hide the # symbols and following space
+      let headerLevel = markdown.headingLevel
+      if nodeText.hasPrefix(String(repeating: "#", count: headerLevel)) {
+        let symbolCount = headerLevel + (nodeText.dropFirst(headerLevel).hasPrefix(" ") ? 1 : 0)
+        symbolRanges.append(NSRange(location: baseLocation, length: symbolCount))
+      }
+      
+    case .code:
+      // `code` - hide the ` at start and end
+      if nodeText.hasPrefix("`") {
+        symbolRanges.append(NSRange(location: baseLocation, length: 1))
+      }
+      if nodeText.hasSuffix("`") && nodeText.count >= 2 {
+        symbolRanges.append(NSRange(location: baseLocation + nodeText.count - 1, length: 1))
+      }
+      
+    case .link:
+      // [text](url) - hide the []() symbols
+      if let openBracket = nodeText.firstIndex(of: "[") {
+        let openPos = nodeText.distance(from: nodeText.startIndex, to: openBracket)
+        symbolRanges.append(NSRange(location: baseLocation + openPos, length: 1))
+      }
+      if let closeBracket = nodeText.firstIndex(of: "]") {
+        let closePos = nodeText.distance(from: nodeText.startIndex, to: closeBracket)
+        symbolRanges.append(NSRange(location: baseLocation + closePos, length: 1))
+      }
+      if let openParen = nodeText.firstIndex(of: "(") {
+        let openPos = nodeText.distance(from: nodeText.startIndex, to: openParen)
+        symbolRanges.append(NSRange(location: baseLocation + openPos, length: 1))
+      }
+      if let closeParen = nodeText.lastIndex(of: ")") {
+        let closePos = nodeText.distance(from: nodeText.startIndex, to: closeParen)
+        symbolRanges.append(NSRange(location: baseLocation + closePos, length: 1))
+      }
+      
+    case .image:
+      // ![text](url) - hide the ![]() symbols
+      if nodeText.hasPrefix("!") {
+        symbolRanges.append(NSRange(location: baseLocation, length: 1))
+      }
+      if let openBracket = nodeText.firstIndex(of: "[") {
+        let openPos = nodeText.distance(from: nodeText.startIndex, to: openBracket)
+        symbolRanges.append(NSRange(location: baseLocation + openPos, length: 1))
+      }
+      if let closeBracket = nodeText.firstIndex(of: "]") {
+        let closePos = nodeText.distance(from: nodeText.startIndex, to: closeBracket)
+        symbolRanges.append(NSRange(location: baseLocation + closePos, length: 1))
+      }
+      if let openParen = nodeText.firstIndex(of: "(") {
+        let openPos = nodeText.distance(from: nodeText.startIndex, to: openParen)
+        symbolRanges.append(NSRange(location: baseLocation + openPos, length: 1))
+      }
+      if let closeParen = nodeText.lastIndex(of: ")") {
+        let closePos = nodeText.distance(from: nodeText.startIndex, to: closeParen)
+        symbolRanges.append(NSRange(location: baseLocation + closePos, length: 1))
+      }
+      
+    case .quote:
+      // > text - hide the > and following space
+      if nodeText.hasPrefix(">") {
+        let symbolCount = 1 + (nodeText.dropFirst(1).hasPrefix(" ") ? 1 : 0)
+        symbolRanges.append(NSRange(location: baseLocation, length: symbolCount))
+      }
+      
+    default:
+      break
+    }
+    
+    return symbolRanges
   }
 
   static func applyBody(with theme: Theme) -> [NSAttributedString.Key: Any] {

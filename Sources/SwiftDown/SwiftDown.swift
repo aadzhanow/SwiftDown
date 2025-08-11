@@ -13,6 +13,7 @@
     var storage: Storage = Storage()
     var highlighter: SwiftDownHighlighter?
     var hasKeyboardToolbar: Bool = true
+    private var fixedIntrinsicContentSize: CGSize?
 
     convenience init(frame: CGRect, theme: Theme) {
       self.init(frame: frame, textContainer: nil)
@@ -50,6 +51,15 @@
 
     public override func willMove(toSuperview newSuperview: UIView?) {
       self.highlighter = SwiftDownHighlighter(textView: self)
+      // Fix the intrinsic content size to prevent layout changes
+      if fixedIntrinsicContentSize == nil {
+        fixedIntrinsicContentSize = super.intrinsicContentSize
+      }
+    }
+    
+    public override var intrinsicContentSize: CGSize {
+      // Return a fixed size to prevent SwiftUI layout changes during text updates
+      return fixedIntrinsicContentSize ?? CGSize(width: UIView.noIntrinsicMetric, height: UIView.noIntrinsicMetric)
     }
   }
 #else
@@ -92,6 +102,8 @@
     var theme: Theme
     private var isEditable: Bool
     private var insetsSize: CGFloat
+    var hideMarkdownSymbols: Bool = false
+    private var fixedIntrinsicContentSize: CGSize?
 
     weak var delegate: NSTextViewDelegate? {
       didSet {
@@ -133,7 +145,7 @@
     }()
 
     // MARK: - TextView setup
-    private lazy var textView: NSTextView = {
+    lazy var textView: NSTextView = {
       let contentSize = scrollView.contentSize
       let textView = CustomTextView(frame: scrollView.frame, theme: theme)
       textView.delegate = self.delegate
@@ -142,6 +154,7 @@
       textView.storage.applyMarkdown = { m in Theme.applyMarkdown(markdown: m, with: self.theme) }
       textView.storage.applyBody = { Theme.applyBody(with: self.theme) }
       textView.storage.theme = theme
+      textView.storage.hideMarkdownSymbols = self.hideMarkdownSymbols
       textView.autoresizingMask = .width
       textView.drawsBackground = true
       textView.isEditable = self.isEditable
@@ -160,12 +173,13 @@
     }()
 
     init(
-      theme: Theme, isEditable: Bool, insetsSize: CGFloat = 0
+      theme: Theme, isEditable: Bool, insetsSize: CGFloat = 0, hideMarkdownSymbols: Bool = false
     ) {
       self.isEditable = isEditable
       self.text = ""
       self.theme = theme
       self.insetsSize = insetsSize
+      self.hideMarkdownSymbols = hideMarkdownSymbols
 
       super.init(frame: .zero)
     }
@@ -179,6 +193,16 @@
 
       setupScrollViewConstraints()
       setupTextView()
+      
+      // Fix the intrinsic content size to prevent layout changes
+      if fixedIntrinsicContentSize == nil {
+        fixedIntrinsicContentSize = intrinsicContentSize
+      }
+    }
+    
+    public override var intrinsicContentSize: NSSize {
+      // Return a fixed size to prevent SwiftUI layout changes during text updates
+      return fixedIntrinsicContentSize ?? NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
     }
 
     func setupScrollViewConstraints() {
